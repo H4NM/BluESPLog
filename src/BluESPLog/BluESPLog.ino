@@ -53,9 +53,6 @@ char *BLEDeviceServiceUUID = "";
 int8_t *BLEDeviceTXPower = 0;
 int *BLERSSI = 0;
 
-    // BOMBACLAD: Name: S36 01D6 LE, Address: e1:a1:8a:97:4c:1d, manufacturer data: a7053c3b582982583390e9, serviceUUID: 0000fe07-0000-1000-8000-00805f9b34fb, txPower: 0, rssi: -92 
-
-
 
 // CLASSIC BLUETOOTH
 #define BT_DISCOVER_TIME 10000
@@ -70,7 +67,7 @@ PicoSyslog::Logger syslog(
     "BluESPLog",
     esp32Hostname,
     PicoSyslog::LogLevel::information,
-    &Serial, //&Serial OR nullptr
+    &Serial, //&Serial OR nullptr for no serial output
     serverIP,
     syslogPort);
 
@@ -88,14 +85,14 @@ void connectWiFi() {
 }
 
 void btAdvertisedDeviceFound(BTAdvertisedDevice *pDevice) {
-  Serial.printf("Found a device asynchronously: %s\n", pDevice->toString().c_str());
+  syslog.printf("Bluetooth | %s\n", pDevice->toString().c_str());
 }
 
 class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice advertisedDevice) {
     
     // JUST ADDED THIS BELOW V
-    syslog.printf("Device: %s | Address: %s | RSSI: %d dBm",
+    syslog.printf("BLE | Device: %s | Address: %s | RSSI: %d dBm",
       advertisedDevice.haveName() ? advertisedDevice.getName().c_str() : "(unnamed)",
       advertisedDevice.getAddress().toString().c_str(),
       advertisedDevice.getRSSI()
@@ -105,19 +102,18 @@ class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
       syslog.printf(" | Service: %s", advertisedDevice.getServiceUUID().toString().c_str());
     }
 
-    if (advertisedDevice.haveAppearance()) {
-      syslog.printf(" | Appearance: %hu", advertisedDevice.getAppearance());
-    }
-
     if (advertisedDevice.haveServiceData()) {
       syslog.printf(" | ServiceData: %s", advertisedDevice.getServiceData());
     }
-    
-    
+
+    if (advertisedDevice.haveAppearance()) {
+      syslog.printf(" | Appearance: %d", advertisedDevice.getAppearance());
+    }
 
     Serial.println();
   }
 };
+
 
 void setup() {
   Serial.begin(115200);
@@ -141,7 +137,7 @@ void setup() {
 
   Serial.println("Scanning...");
 
-  // INIT BLE
+  // INIT ASYNC BLE
   BLEDevice::init("");
   pBLEScan = BLEDevice::getScan();  //create new scan
   pBLEScan->setAdvertisedDeviceCallbacks(new AdvertisedDeviceCallbacks());
@@ -150,12 +146,13 @@ void setup() {
   pBLEScan->setWindow(99);  // less or equal setInterval value
   pBLEScan->start(0, nullptr, false); 
 
-  // INIT CLASSIC BLUETOOTH
+  // INIT ASYNC CLASSIC BLUETOOTH
   SerialBT.begin("ESP32test");  //Bluetooth device name
   SerialBT.discoverAsync(btAdvertisedDeviceFound);
 }
 
 void loop() {
-  connectWiFi();
+
   delay(2000);
+  connectWiFi();
 }
