@@ -1,1 +1,3 @@
 .env
+src/BluESPLog/SECRETS.h
+src/BluESPLog/BluESPLog.ino.BACKUP
