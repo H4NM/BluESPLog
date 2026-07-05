@@ -2,8 +2,6 @@
 
 // TO DO:
 // Fixa till så allt lämplig data inhämtas (kanske kolla upp om det går att ansluta för mer info)? 
-// kolla #define vs 'const char *' osv
-// Kolla secrets för wifi creds
 
 
 // BLE Reference:
@@ -40,6 +38,9 @@
 #endif
 
 
+// DEV
+bool dev = true;
+
 // WIFI CREDS
 const char *ssid = SECRET_SSID;
 const char *password = SECRET_PASSWORD;
@@ -53,14 +54,16 @@ char *BLEDeviceServiceUUID = "";
 int8_t *BLEDeviceTXPower = 0;
 int *BLERSSI = 0;
 
+// BLUETOOTH SCAN TIMES
+int BLE_SCAN_TIME = 5;  //Seconds
+int BC_SCAN_TIME = BLE_SCAN_TIME * 1000; //Miliseconds
 
-// CLASSIC BLUETOOTH
-#define BT_DISCOVER_TIME 10000
 
 // SYSLOG
 const char *esp32Hostname = "ESP32";
 const char *serverIP = "192.168.50.8";
 const unsigned int syslogPort = 514;
+String deviceDiscoveryText = "";
 
 // INIT PicoSyslog and BLE and classic Bluetooth
 PicoSyslog::Logger syslog(
@@ -76,7 +79,6 @@ BLEScan *pBLEScan;
 BluetoothSerial SerialBT;
 
 
-
 void connectWiFi() {
   if (WiFi.status() != WL_CONNECTED) {
     syslog.printf("WiFi disconnected. Reconnecting...\n");
@@ -84,33 +86,85 @@ void connectWiFi() {
   }
 }
 
+void logEvent(string text){
+  if (dev){
+    Serial.println(text);
+  }else{
+    syslog.printf(text); 
+  }
+}
+
+void scanBC(){
+    Serial.println("Scanning Bluetooth Classic... ");
+    BTScanResults *foundDevices = SerialBT.discover(BC_SCAN_TIME);
+    if (foundDevices) {
+      
+      int foundDeviceCount = foundDevices->getCount();
+    
+      for (int i = 0; i < foundDeviceCount; i++) {
+          BTAdvertisedDevice *foundDevice = foundDevices->getDevice(i);
+          Serial.printf("BC | %s\n", foundDevice->toString().c_str());
+      }
+    } else {
+      Serial.println("Error on BT Scan, no result!");
+    }
+}
+
+void scanBLE(){
+    Serial.println("Scanning Bluetooth Low Energy... ");    
+    BLEScanResults *foundDevices = pBLEScan->start(BLE_SCAN_TIME, false);
+
+    int foundDeviceCount = foundDevices->getCount();
+    
+    for (int i = 0; i < foundDeviceCount; i++) {
+        BLEAdvertisedDevice foundDevice = foundDevices->getDevice(i);
+        Serial.printf("BLE | %s\n", foundDevice.toString().c_str());
+    }
+
+    pBLEScan->clearResults();
+}
+
 void btAdvertisedDeviceFound(BTAdvertisedDevice *pDevice) {
-  syslog.printf("Bluetooth | %s\n", pDevice->toString().c_str());
+  if (dev == false){
+    syslog.printf("Bluetooth | %s\n", pDevice->toString().c_str());  
+  }else{
+    Serial.printf("Bluetooth | %s\n", pDevice->toString().c_str()); 
+  }
 }
 
 class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice advertisedDevice) {
+    if (dev == false){
     
-    // JUST ADDED THIS BELOW V
-    syslog.printf("BLE | Device: %s | Address: %s | RSSI: %d dBm",
-      advertisedDevice.haveName() ? advertisedDevice.getName().c_str() : "(unnamed)",
-      advertisedDevice.getAddress().toString().c_str(),
-      advertisedDevice.getRSSI()
-    );
-
-    if (advertisedDevice.haveServiceUUID()) {
-      syslog.printf(" | Service: %s", advertisedDevice.getServiceUUID().toString().c_str());
+      // JUST ADDED THIS BELOW V
+      syslog.printf("BLE | Device: %s | Address: %s | RSSI: %d dBm",
+        advertisedDevice.haveName() ? advertisedDevice.getName().c_str() : "(unnamed)",
+        advertisedDevice.getAddress().toString().c_str(),
+        advertisedDevice.getRSSI()
+      );
+  
+      if (advertisedDevice.haveServiceUUID()) {
+        syslog.printf(" | Service: %s", advertisedDevice.getServiceUUID().toString().c_str());
+      }
+  
+      if (advertisedDevice.haveServiceData()) {
+        syslog.printf(" | ServiceData: %s", advertisedDevice.getServiceData());
+      }
+  
+      if (advertisedDevice.haveAppearance()) {
+        syslog.printf(" | Appearance: %d", advertisedDevice.getAppearance());
+      }
+  
+      Serial.println();
+    }else{
+      Serial.printf("BLE | Device: %s | Address: %s | RSSI: %d dBm",
+        advertisedDevice.haveName() ? advertisedDevice.getName().c_str() : "(unnamed)",
+        advertisedDevice.getAddress().toString().c_str(),
+        advertisedDevice.getRSSI()
+      );
+      
+      Serial.println();
     }
-
-    if (advertisedDevice.haveServiceData()) {
-      syslog.printf(" | ServiceData: %s", advertisedDevice.getServiceData());
-    }
-
-    if (advertisedDevice.haveAppearance()) {
-      syslog.printf(" | Appearance: %d", advertisedDevice.getAppearance());
-    }
-
-    Serial.println();
   }
 };
 
@@ -120,39 +174,46 @@ void setup() {
   delay(10);
   Serial.println();
   Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
+  Serial.printf("Starting - dev mode active: ");
 
-  WiFi.begin(ssid, password);
+  Serial.printf(dev ? "TRUE" : "FALSE");
 
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print("..");
-    delay(500);
+  if (dev == false){
+  
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
+
+    WiFi.begin(ssid, password);
+
+    while (WiFi.status() != WL_CONNECTED) {
+      Serial.print("..");
+      delay(500);
+    }
+    Serial.println("");
+    Serial.println("WiFi connected.");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
   }
 
-  Serial.println("");
-  Serial.println("WiFi connected.");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  Serial.println("Scanning...");
-
   // INIT ASYNC BLE
+  Serial.println("Initiating BLE");
   BLEDevice::init("");
   pBLEScan = BLEDevice::getScan();  //create new scan
-  pBLEScan->setAdvertisedDeviceCallbacks(new AdvertisedDeviceCallbacks());
   pBLEScan->setActiveScan(true);  //active scan uses more power, but get results faster
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);  // less or equal setInterval value
-  pBLEScan->start(0, nullptr, false); 
-
-  // INIT ASYNC CLASSIC BLUETOOTH
+  
+  // INIT CLASSIC BLUETOOTH
+  Serial.println("Initiating Bluetooth classic");
   SerialBT.begin("ESP32test");  //Bluetooth device name
-  SerialBT.discoverAsync(btAdvertisedDeviceFound);
 }
 
 void loop() {
-
-  delay(2000);
-  connectWiFi();
+  if (dev == false){
+    connectWiFi();  
+  }
+  scanBC();
+  delay(350);
+  scanBLE();
+  delay(350);
 }
